@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local configs / secrets
+*.local.json
+*.secret.json
+config_path.txt
+
+# Backup artifacts
+*.backup
+*.sql
+
+# PyInstaller temp
+*.manifest
+*.exe.manifest

@@ -23,6 +23,9 @@ class ProfileService:
         validate_profile(profile)
         self._config_store.save_profile(path, profile)
 
+    def validate_profile(self, profile: BackupProfile) -> None:
+        validate_profile(profile)
+
     def get_profile_file_name(self, profile: BackupProfile) -> str:
         safe_name = profile.profile_name.strip() or "profile"
         safe_name = safe_name.replace(" ", "_")

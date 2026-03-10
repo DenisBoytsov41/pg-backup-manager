@@ -11,7 +11,14 @@ def get_app_dir() -> Path:
 
     file_name = globals().get("__file__")
     if file_name:
-        return Path(file_name).resolve().parent.parent.parent
+        current = Path(file_name).resolve()
+
+        # Ожидаемая структура:
+        # <project_root>/src/pg_backup_manager/shared/paths.py
+        if len(current.parents) >= 4 and current.parents[2].name == "src":
+            return current.parents[3]
+
+        return current.parent
 
     return Path.cwd()
 
@@ -23,7 +30,7 @@ def expand_env_path(value: str) -> str:
 
 
 def normalize_path(value: str) -> Path:
-    return Path(expand_env_path(value)).expanduser().resolve()
+    return Path(expand_env_path(value)).expanduser().resolve(strict=False)
 
 
 def ensure_directory(path: str | Path) -> Path:

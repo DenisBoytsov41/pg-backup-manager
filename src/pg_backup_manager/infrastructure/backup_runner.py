@@ -33,9 +33,6 @@ class BackupRunResult:
 
 
 class BackupRunner:
-    def __init__(self) -> None:
-        pass
-
     def run_profile(self, profile: BackupProfile) -> BackupRunResult:
         validate_profile(profile)
         validate_existing_executable(profile.postgres.pg_dump_path, "pg_dump.exe")
@@ -46,9 +43,7 @@ class BackupRunner:
         logger = LoggingService(backup_dir, profile.logging.main_log_name)
         run_log_path = backup_dir / run_log_name
 
-        logger.write_main_log(
-            f"START: Запуск backup для профиля '{profile.profile_name}'."
-        )
+        logger.write_main_log(f"START: Запуск backup для профиля '{profile.profile_name}'.")
 
         created_dump_files: list[str] = []
         created_globals_file: str | None = None
@@ -58,8 +53,8 @@ class BackupRunner:
         try:
             if profile.postgres.password.strip():
                 os.environ["PGPASSWORD"] = profile.postgres.password
-            elif "PGPASSWORD" in os.environ:
-                del os.environ["PGPASSWORD"]
+            else:
+                os.environ.pop("PGPASSWORD", None)
 
             for database_name in profile.postgres.databases:
                 dump_file_name = build_dump_file_name(database_name, timestamp)
@@ -81,14 +76,17 @@ class BackupRunner:
                     database_name,
                 ]
 
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                )
+                result = subprocess.run(args, capture_output=True)
 
-                output_text = self._decode_process_output(result.stdout, result.stderr)
+                stdout_text = self._decode_bytes(result.stdout)
+                stderr_text = self._decode_bytes(result.stderr)
+                output_text = self._combine_output(stdout_text, stderr_text)
+
                 logger.append_to_run_log(run_log_path, f"Backup базы '{database_name}'")
-                logger.append_to_run_log(run_log_path, output_text.strip() or "Нет вывода процесса.")
+                logger.append_to_run_log(
+                    run_log_path,
+                    output_text.strip() or "Нет вывода процесса.",
+                )
 
                 if result.returncode != 0:
                     if dump_path.exists():
@@ -123,28 +121,35 @@ class BackupRunner:
                     "--no-password",
                 ]
 
-                result = subprocess.run(
-                    globals_args,
-                    capture_output=True,
+                result = subprocess.run(globals_args, capture_output=True)
+
+                stdout_text = self._decode_bytes(result.stdout)
+                stderr_text = self._decode_bytes(result.stderr)
+
+                logger.append_to_run_log(run_log_path, "Выгрузка globals")
+                logger.append_to_run_log(
+                    run_log_path,
+                    stderr_text.strip() or "Нет служебного вывода процесса.",
                 )
 
-                output_text = self._decode_process_output(result.stdout, result.stderr)
-                logger.append_to_run_log(run_log_path, "Выгрузка globals")
-                logger.append_to_run_log(run_log_path, output_text.strip() or "Нет вывода процесса.")
-
                 if result.returncode == 0:
-                    globals_path.write_text(output_text, encoding="utf-8")
+                    globals_path.write_bytes(result.stdout or b"")
                     created_globals_file = str(globals_path)
                     logger.write_main_log(
-                        f"INFO: Globals сохранены в '{globals_path.name}'."
+                        f"Globals сохранены в '{globals_path.name}'.",
+                        level="INFO",
                     )
                 else:
                     logger.write_main_log(
-                        "WARNING: Не удалось выгрузить globals.",
+                        "Не удалось выгрузить globals.",
                         level="WARNING",
                     )
 
-            self._cleanup_old_files(backup_dir, profile.backup.retention_days, profile.logging.main_log_name)
+            self._cleanup_old_files(
+                backup_dir=backup_dir,
+                retention_days=profile.backup.retention_days,
+                main_log_name=profile.logging.main_log_name,
+            )
 
             success_message = "Резервное копирование выполнено успешно."
             logger.write_main_log(success_message, level="INFO")
@@ -191,22 +196,22 @@ class BackupRunner:
             if file_path.stat().st_mtime < border:
                 file_path.unlink(missing_ok=True)
 
-    def _decode_process_output(self, stdout: bytes | None, stderr: bytes | None) -> str:
-        raw = b""
-        if stdout:
-            raw += stdout
-        if stderr:
-            if raw:
-                raw += b"\n"
-            raw += stderr
-
-        if not raw:
+    def _decode_bytes(self, data: bytes | None) -> str:
+        if not data:
             return ""
 
         for encoding in ("cp866", "cp1251", "utf-8"):
             try:
-                return raw.decode(encoding)
+                return data.decode(encoding)
             except UnicodeDecodeError:
                 continue
 
-        return raw.decode("utf-8", errors="replace")
+        return data.decode("utf-8", errors="replace")
+
+    def _combine_output(self, stdout_text: str, stderr_text: str) -> str:
+        parts = []
+        if stdout_text.strip():
+            parts.append(stdout_text.strip())
+        if stderr_text.strip():
+            parts.append(stderr_text.strip())
+        return "\n".join(parts)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from pg_backup_manager.app.services import ProfileService
 from pg_backup_manager.infrastructure.backup_runner import BackupRunner
@@ -21,6 +20,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command")
+
+    subparsers.add_parser(
+        "gui",
+        help="Запустить графический интерфейс",
+    )
 
     run_profile_parser = subparsers.add_parser(
         "run-profile",
@@ -72,7 +76,7 @@ def validate_profile(profile_path: str) -> int:
     profile_service = ProfileService(config_store)
 
     profile = profile_service.load_profile(profile_path)
-    profile_service.save_profile(profile_path, profile)
+    profile_service.validate_profile(profile)
 
     print("Profile is valid.")
     print(f"Profile name: {profile.profile_name}")
@@ -80,16 +84,20 @@ def validate_profile(profile_path: str) -> int:
     return 0
 
 
+def run_gui() -> int:
+    from pg_backup_manager.ui.main_window import run_main_window
+
+    return run_main_window()
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    if not args.command:
-        print("PG Backup Manager bootstrap")
-        parser.print_help()
-        return 0
-
     try:
+        if not args.command or args.command == "gui":
+            return run_gui()
+
         if args.command == "run-profile":
             return run_profile(args.profile_path)
 

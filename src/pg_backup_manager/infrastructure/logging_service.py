@@ -29,24 +29,20 @@ class LoggingService:
     def write_main_log(self, message: str, level: str = "INFO") -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"{timestamp} {level}: {message}\n"
-        self._main_log_path.write_text(
-            self._main_log_path.read_text(encoding="utf-8") + line if self._main_log_path.exists() else line,
-            encoding="utf-8",
-        )
+        with self._main_log_path.open("a", encoding="utf-8") as file:
+            file.write(line)
 
     def append_to_run_log(self, run_log_path: str | Path, message: str) -> None:
         path = Path(run_log_path)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"{timestamp} - {message}\n"
-        path.write_text(
-            path.read_text(encoding="utf-8") + line if path.exists() else line,
-            encoding="utf-8",
-        )
+        with path.open("a", encoding="utf-8") as file:
+            file.write(line)
 
     def write_process_output(self, run_log_path: str | Path, content: str) -> None:
         path = Path(run_log_path)
-        if content:
-            path.write_text(content, encoding="utf-8")
+        with path.open("a", encoding="utf-8") as file:
+            file.write(content)
 
     def get_log_paths(self, run_log_name: str | None = None) -> LogPaths:
         run_log_path = self._log_dir / run_log_name if run_log_name else None

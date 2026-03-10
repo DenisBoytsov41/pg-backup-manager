@@ -623,16 +623,33 @@ class MainWindow(tk.Tk):
         return profile_path, profile
 
     def _validate_profile(self) -> None:
-        profile = self._current_profile_from_form()
-        self._profile_service.validate_profile(profile)
-        self._status("Профиль корректен.")
-        messagebox.showinfo("Проверка", "Профиль корректен.")
+        try:
+            profile = self._current_profile_from_form()
+            self._profile_service.validate_profile(profile)
+            self._status("Профиль корректен.")
+            messagebox.showinfo("Проверка", "Профиль корректен.")
+        except ValidationError as exc:
+            self._status(f"Ошибка проверки: {exc}")
+            messagebox.showerror("Ошибка проверки", str(exc))
+        except Exception as exc:
+            self._status(f"Неожиданная ошибка: {exc}")
+            messagebox.showerror("Неожиданная ошибка", str(exc))
 
     def _run_test_backup(self) -> None:
-        profile = self._current_profile_from_form()
-        result = self._backup_runner.run_profile(profile)
-        self._show_backup_result(result)
-        self._status("Тестовый backup выполнен успешно.")
+        try:
+            profile = self._current_profile_from_form()
+            result = self._backup_runner.run_profile(profile)
+            self._show_backup_result(result)
+            self._status("Тестовый backup выполнен успешно.")
+        except ValidationError as exc:
+            self._status(f"Ошибка проверки: {exc}")
+            messagebox.showerror("Ошибка проверки", str(exc))
+        except BackupExecutionError as exc:
+            self._status(f"Ошибка backup: {exc}")
+            messagebox.showerror("Ошибка backup", str(exc))
+        except Exception as exc:
+            self._status(f"Неожиданная ошибка: {exc}")
+            messagebox.showerror("Неожиданная ошибка", str(exc))
 
     def _show_backup_result(self, result: BackupRunResult) -> None:
         lines = [

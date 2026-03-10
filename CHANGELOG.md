@@ -32,3 +32,8 @@
 - Добавлен `BackupRunner` для выполнения резервного копирования PostgreSQL-баз через `pg_dump` и `pg_dumpall`
 - Реализована очистка устаревших backup/log/sql файлов по сроку хранения
 - Выполнена проверка импортов и базовой работоспособности слоёв `shared` и `infrastructure`
+
+### Added
+- Добавлен CLI entrypoint в `__main__.py`
+- Реализованы команды `run-profile` и `validate-profile`
+- Добаваны коды возврата CLI для ошибок конфигурации, валидации и backup

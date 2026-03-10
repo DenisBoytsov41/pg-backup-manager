@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from pg_backup_manager.domain.models import AppSettings, BackupProfile
@@ -7,6 +8,7 @@ from pg_backup_manager.domain.validators import validate_profile
 from pg_backup_manager.infrastructure.config_store import JsonConfigStore
 from pg_backup_manager.infrastructure.scheduler import ScheduledTaskInfo, WindowsTaskScheduler
 from pg_backup_manager.shared.errors import ValidationError
+from pg_backup_manager.shared.paths import get_app_dir
 
 
 class ProfileService:
@@ -59,11 +61,29 @@ class SchedulerService:
     def __init__(self, scheduler: WindowsTaskScheduler | None = None) -> None:
         self._scheduler = scheduler or WindowsTaskScheduler()
 
+    def build_task_run_command(self, profile_path: str) -> str:
+        normalized_profile_path = str(Path(profile_path).resolve())
+
+        if getattr(sys, "frozen", False):
+            executable = str(Path(sys.executable).resolve())
+            return f'"{executable}" run-profile "{normalized_profile_path}"'
+
+        python_executable = str(Path(sys.executable).resolve())
+        project_root = str(Path(get_app_dir()).resolve())
+        src_path = str((Path(project_root) / "src").resolve())
+
+        return (
+            'cmd.exe /c '
+            f'"cd /d ""{project_root}"" && '
+            f'set ""PYTHONPATH={src_path}"" && '
+            f'""{python_executable}"" -m pg_backup_manager run-profile ""{normalized_profile_path}"""'
+        )
+
     def create_or_update_task(
         self,
         *,
         profile: BackupProfile,
-        task_run_command: str,
+        profile_path: str,
         run_password: str | None = None,
     ) -> str:
         if not profile.scheduler.enabled:
@@ -71,6 +91,8 @@ class SchedulerService:
 
         if not profile.scheduler.task_name.strip():
             raise ValidationError("Не указано имя задачи Планировщика.")
+
+        task_run_command = self.build_task_run_command(profile_path)
 
         return self._scheduler.create_or_update_task(
             task_name=profile.scheduler.task_name,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -123,12 +124,6 @@ class WindowsTaskScheduler:
             is_system = normalized_run_user in {"SYSTEM", "NT AUTHORITY\\SYSTEM"}
 
             if not is_system:
-                if run_password is None:
-                    raise SchedulerError(
-                        "Для указанного пользователя запуска нужно явно передать run_password "
-                        "или использовать SYSTEM."
-                    )
-
                 if run_password:
                     args.extend(["/rp", run_password])
                 else:
@@ -190,7 +185,8 @@ class WindowsTaskScheduler:
 
     def _run_schtasks_process(self, args: list[str], *, check: bool = False) -> subprocess.CompletedProcess[bytes]:
         try:
-            return subprocess.run(args, capture_output=True, check=check)
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            return subprocess.run(args, capture_output=True, check=check, creationflags=creationflags)
         except FileNotFoundError as exc:
             raise SchedulerError("Не найден schtasks. Команда доступна только в Windows.") from exc
         except OSError as exc:
@@ -240,7 +236,9 @@ class WindowsTaskScheduler:
             or "не удается найти указанный файл" in lowered
             or "не удается найти указанный путь" in lowered
             or "the system cannot find the file specified" in lowered
-            or "error:" in lowered and "cannot find" in lowered
+            or "cannot find the task" in lowered
+            or "не удалось найти задачу" in lowered
+            or "cannot find the requested task" in lowered
         )
 
     def _parse_query_output(self, *, task_name: str, raw_output: str) -> ScheduledTaskInfo:
@@ -262,7 +260,10 @@ class WindowsTaskScheduler:
                 ["next run time", "следующее время выполнения", "время следующего запуска"],
             ),
             last_result=self._pick_field(fields, ["last result", "последний результат"]),
-            task_to_run=self._pick_field(fields, ["task to run", "задача для выполнения"]),
+            task_to_run=self._pick_field(
+                fields,
+                ["task to run", "задача для выполнения", "задача для запуска", "команда задачи"],
+            ),
         )
 
     def _pick_field(self, fields: dict[str, str], keys: list[str]) -> str | None:

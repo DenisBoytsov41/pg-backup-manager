@@ -5,8 +5,9 @@ import subprocess
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Callable, cast
 
-from pg_backup_manager.app.services import AppSettingsService, ProfileService
+from pg_backup_manager.app.services import AppSettingsService, ProfileService, SchedulerService
 from pg_backup_manager.domain.models import (
     AppSettings,
     BackupProfile,
@@ -18,11 +19,17 @@ from pg_backup_manager.domain.models import (
 )
 from pg_backup_manager.infrastructure.backup_runner import BackupRunResult, BackupRunner
 from pg_backup_manager.infrastructure.config_store import JsonConfigStore
-from pg_backup_manager.shared.errors import BackupExecutionError, ConfigError, ValidationError
+from pg_backup_manager.infrastructure.scheduler import ScheduledTaskInfo
+from pg_backup_manager.shared.errors import (
+    BackupExecutionError,
+    ConfigError,
+    SchedulerError,
+    ValidationError,
+)
 from pg_backup_manager.shared.paths import get_app_dir, get_default_app_settings_path
-from typing import Callable, cast
 
 EntryWidget = tk.Entry | ttk.Entry
+
 
 def open_in_explorer(path: str) -> None:
     if not path:
@@ -53,12 +60,14 @@ class MainWindow(tk.Tk):
         self._profile_service = ProfileService(self._config_store)
         self._app_settings_service = AppSettingsService(self._config_store)
         self._backup_runner = BackupRunner()
+        self._scheduler_service = SchedulerService()
 
         self._app_dir = get_app_dir()
         self._app_settings_path = get_default_app_settings_path()
         self._app_settings = AppSettings()
 
         self._status_var = tk.StringVar(value="Готово.")
+        self._scheduler_status_var = tk.StringVar(value="Статус задачи не запрошен.")
         self._profile_path_var = tk.StringVar()
         self._profile_name_var = tk.StringVar()
 
@@ -84,6 +93,7 @@ class MainWindow(tk.Tk):
         self._start_time_var = tk.StringVar(value="02:00")
         self._days_of_week_var = tk.StringVar()
         self._run_user_var = tk.StringVar()
+        self._run_password_var = tk.StringVar()
         self._run_with_highest_privileges_var = tk.BooleanVar(value=False)
 
         self._entry_menu: tk.Menu | None = None
@@ -111,16 +121,18 @@ class MainWindow(tk.Tk):
         self._create_entry(top, self._profile_path_var).grid(row=0, column=1, sticky="ew", pady=4)
 
         ttk.Button(top, text="Открыть...", command=self._browse_profile).grid(row=0, column=2, padx=4, pady=4)
-        ttk.Button(top, text="Загрузить", command=self._load_profile_from_current_path).grid(row=0, column=3, padx=4, pady=4)
+        ttk.Button(top, text="Загрузить", command=self._load_profile_from_current_path).grid(
+            row=0, column=3, padx=4, pady=4
+        )
         ttk.Button(top, text="Новый", command=self._new_profile).grid(row=1, column=0, padx=4, pady=4, sticky="w")
-        ttk.Button(top, text="Сохранить", command=self._save_profile).grid(row=1, column=1, padx=4, pady=4, sticky="w")
-        ttk.Button(top, text="Сохранить как...", command=self._save_profile_as).grid(row=1, column=2, padx=4, pady=4, sticky="w")
+        ttk.Button(top, text="Сохранить", command=self._save_profile).grid(
+            row=1, column=1, padx=4, pady=4, sticky="w"
+        )
+        ttk.Button(top, text="Сохранить как...", command=self._save_profile_as).grid(
+            row=1, column=2, padx=4, pady=4, sticky="w"
+        )
         ttk.Button(top, text="Открыть папку профиля", command=self._open_profile_folder).grid(
-            row=1,
-            column=3,
-            padx=4,
-            pady=4,
-            sticky="w",
+            row=1, column=3, padx=4, pady=4, sticky="w"
         )
 
         notebook = ttk.Notebook(root)
@@ -214,58 +226,73 @@ class MainWindow(tk.Tk):
         self._add_labeled_entry(tab_scheduler, 3, "Время запуска (HH:MM):", self._start_time_var)
         self._add_labeled_entry(tab_scheduler, 4, "Дни недели (через запятую):", self._days_of_week_var)
         self._add_labeled_entry(tab_scheduler, 5, "Пользователь запуска:", self._run_user_var)
+        self._add_labeled_entry(
+            tab_scheduler,
+            6,
+            "Пароль запуска (не сохраняется):",
+            self._run_password_var,
+            show="*",
+        )
         ttk.Checkbutton(
             tab_scheduler,
             text="Запускать с наивысшими правами",
             variable=self._run_with_highest_privileges_var,
-        ).grid(row=6, column=1, sticky="w", pady=4)
+        ).grid(row=7, column=1, sticky="w", pady=4)
+
+        scheduler_actions = ttk.LabelFrame(tab_scheduler, text="Управление задачей", padding=10)
+        scheduler_actions.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        scheduler_actions.columnconfigure(0, weight=1)
+
+        ttk.Button(
+            scheduler_actions,
+            text="Создать / обновить задачу",
+            command=self._create_or_update_scheduler_task,
+        ).grid(row=0, column=0, sticky="w", padx=4, pady=4)
+
+        ttk.Button(
+            scheduler_actions,
+            text="Проверить задачу",
+            command=self._query_scheduler_task,
+        ).grid(row=1, column=0, sticky="w", padx=4, pady=4)
+
+        ttk.Button(
+            scheduler_actions,
+            text="Запустить задачу сейчас",
+            command=self._run_scheduler_task_now,
+        ).grid(row=2, column=0, sticky="w", padx=4, pady=4)
+
+        ttk.Button(
+            scheduler_actions,
+            text="Удалить задачу",
+            command=self._delete_scheduler_task,
+        ).grid(row=3, column=0, sticky="w", padx=4, pady=4)
 
         ttk.Label(
-            tab_scheduler,
-            text="Интеграция с Планировщиком задач будет подключена следующим этапом.",
-            foreground="#555555",
-            wraplength=820,
+            scheduler_actions,
+            textvariable=self._scheduler_status_var,
             justify="left",
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
+            wraplength=760,
+            foreground="#333333",
+        ).grid(row=4, column=0, sticky="w", padx=4, pady=(10, 4))
 
         actions = ttk.LabelFrame(tab_actions, text="Действия", padding=10)
         actions.grid(row=0, column=0, columnspan=2, sticky="ew")
         actions.columnconfigure(0, weight=1)
 
         ttk.Button(actions, text="Проверить профиль", command=self._validate_profile).grid(
-            row=0,
-            column=0,
-            sticky="w",
-            padx=4,
-            pady=4,
+            row=0, column=0, sticky="w", padx=4, pady=4
         )
         ttk.Button(actions, text="Тестовый backup сейчас", command=self._run_test_backup).grid(
-            row=1,
-            column=0,
-            sticky="w",
-            padx=4,
-            pady=4,
+            row=1, column=0, sticky="w", padx=4, pady=4
         )
         ttk.Button(actions, text="Открыть папку backup", command=self._open_backup_folder).grid(
-            row=2,
-            column=0,
-            sticky="w",
-            padx=4,
-            pady=4,
+            row=2, column=0, sticky="w", padx=4, pady=4
         )
         ttk.Button(actions, text="Открыть папку приложения", command=self._open_app_folder).grid(
-            row=3,
-            column=0,
-            sticky="w",
-            padx=4,
-            pady=4,
+            row=3, column=0, sticky="w", padx=4, pady=4
         )
         ttk.Button(actions, text="Закрыть", command=self._on_close).grid(
-            row=4,
-            column=0,
-            sticky="w",
-            padx=4,
-            pady=(12, 4),
+            row=4, column=0, sticky="w", padx=4, pady=(12, 4)
         )
 
         status_bar = ttk.Label(root, textvariable=self._status_var, anchor="w")
@@ -300,15 +327,17 @@ class MainWindow(tk.Tk):
         entry.grid(row=row, column=1, sticky="ew", pady=4)
 
         if button_text and button_command:
-            ttk.Button(parent, text=button_text, command=button_command).grid(row=row, column=2, padx=4, pady=4)
+            ttk.Button(parent, text=button_text, command=button_command).grid(
+                row=row, column=2, padx=4, pady=4
+            )
 
         return entry
-    
+
     def _get_entry_widget(self, widget: object) -> EntryWidget | None:
         if isinstance(widget, (tk.Entry, ttk.Entry)):
             return cast(EntryWidget, widget)
         return None
-    
+
     def _add_labeled_combobox(
         self,
         parent: ttk.Widget,
@@ -353,9 +382,10 @@ class MainWindow(tk.Tk):
         return "break"
 
     def _clipboard_on_focus(self, virtual_event_name: str) -> None:
-        widget = self.focus_get()
-        if widget and widget.winfo_class() in {"Entry", "TEntry"}:
-            widget.event_generate(virtual_event_name)
+        entry = self._get_entry_widget(self.focus_get())
+        if entry is None:
+            return
+        entry.event_generate(virtual_event_name)
 
     def _generate_on_widget(self, widget: tk.Widget, virtual_event_name: str) -> str:
         widget.event_generate(virtual_event_name)
@@ -485,6 +515,7 @@ class MainWindow(tk.Tk):
         profile = self._profile_service.create_default_profile()
         self._populate_form(profile)
         self._profile_path_var.set("")
+        self._scheduler_status_var.set("Статус задачи не запрошен.")
         self._status("Создан новый профиль.")
 
     def _browse_profile(self) -> None:
@@ -522,6 +553,7 @@ class MainWindow(tk.Tk):
         self._populate_form(profile)
         self._profile_path_var.set(profile_path)
         self._app_settings = self._app_settings_service.register_recent_profile(self._app_settings, profile_path)
+        self._scheduler_status_var.set("Статус задачи не запрошен.")
         self._status(f"Профиль загружен: {profile_path}")
 
     def _save_profile(self) -> None:
@@ -566,6 +598,30 @@ class MainWindow(tk.Tk):
         self._status(f"Профиль сохранён: {path}")
         messagebox.showinfo("Сохранено", f"Профиль сохранён:\n{path}")
 
+    def _ensure_profile_saved(self) -> tuple[str, BackupProfile]:
+        profile_path = self._profile_path_var.get().strip()
+        profile = self._current_profile_from_form()
+
+        if not profile_path:
+            initialdir = str(self._app_dir)
+            initialfile = self._profile_service.get_profile_file_name(profile)
+
+            profile_path = filedialog.asksaveasfilename(
+                title="Сохранить профиль backup как",
+                defaultextension=".json",
+                initialdir=initialdir,
+                initialfile=initialfile,
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            )
+            if not profile_path:
+                raise ValidationError("Операция отменена: профиль должен быть сохранён.")
+
+            self._profile_path_var.set(profile_path)
+
+        self._profile_service.save_profile(profile_path, profile)
+        self._app_settings = self._app_settings_service.register_recent_profile(self._app_settings, profile_path)
+        return profile_path, profile
+
     def _validate_profile(self) -> None:
         profile = self._current_profile_from_form()
         self._profile_service.validate_profile(profile)
@@ -598,6 +654,73 @@ class MainWindow(tk.Tk):
             lines.append(f"Globals: {result.created_globals_file}")
 
         messagebox.showinfo("Успех", "\n".join(lines))
+
+    def _create_or_update_scheduler_task(self) -> None:
+        profile_path, profile = self._ensure_profile_saved()
+        run_password = self._run_password_var.get().strip() or None
+
+        output = self._scheduler_service.create_or_update_task(
+            profile=profile,
+            profile_path=profile_path,
+            run_password=run_password,
+        )
+        self._run_password_var.set("")
+
+        self._status("Задача Планировщика создана/обновлена.")
+        info = self._scheduler_service.query_task(profile)
+        self._update_scheduler_status(info)
+
+        messagebox.showinfo(
+            "Планировщик",
+            f"Задача успешно создана/обновлена.\n\n{output or 'Команда выполнена успешно.'}",
+        )
+
+    def _query_scheduler_task(self) -> None:
+        profile = self._current_profile_from_form()
+        info = self._scheduler_service.query_task(profile)
+        self._update_scheduler_status(info)
+        self._status("Статус задачи обновлён.")
+
+    def _run_scheduler_task_now(self) -> None:
+        profile = self._current_profile_from_form()
+        output = self._scheduler_service.run_task(profile)
+        self._status("Задача Планировщика запущена.")
+        self._scheduler_status_var.set(
+            f"{self._scheduler_status_var.get()}\n\nПоследний запуск инициирован вручную."
+        )
+        messagebox.showinfo("Планировщик", output or "Задача успешно запущена.")
+
+    def _delete_scheduler_task(self) -> None:
+        profile = self._current_profile_from_form()
+
+        if not messagebox.askyesno(
+            "Удаление задачи",
+            "Удалить задачу Планировщика для текущего профиля?",
+        ):
+            return
+
+        output = self._scheduler_service.delete_task(profile)
+        self._scheduler_status_var.set("Задача Планировщика удалена или не существовала.")
+        self._status("Задача Планировщика удалена.")
+        messagebox.showinfo("Планировщик", output or "Задача удалена.")
+
+    def _update_scheduler_status(self, info: ScheduledTaskInfo) -> None:
+        if not info.exists:
+            self._scheduler_status_var.set(f"Задача '{info.task_name}' не найдена.")
+            return
+
+        lines = [f"Задача: {info.task_name}"]
+
+        if info.status:
+            lines.append(f"Состояние: {info.status}")
+        if info.next_run_time:
+            lines.append(f"Следующий запуск: {info.next_run_time}")
+        if info.last_result:
+            lines.append(f"Последний результат: {info.last_result}")
+        if info.task_to_run:
+            lines.append(f"Команда: {info.task_to_run}")
+
+        self._scheduler_status_var.set("\n".join(lines))
 
     def _choose_file(self, variable: tk.StringVar, title: str, filetypes: list[tuple[str, str]]) -> None:
         current_value = variable.get().strip()
@@ -686,6 +809,9 @@ def run_main_window() -> int:
     except BackupExecutionError as exc:
         messagebox.showerror("Backup execution error", str(exc))
         return 4
+    except SchedulerError as exc:
+        messagebox.showerror("Scheduler error", str(exc))
+        return 5
     except Exception as exc:
         messagebox.showerror("Unexpected error", str(exc))
         return 99

@@ -19,3 +19,9 @@
   - `application-flow.md`
   - `config-model.md`
   - `scheduler-integration.md`
+
+  ### Added
+- Реализованы domain models для профилей backup и настроек приложения
+- Добавлены валидаторы профилей и расписаний
+- Добавлен JSON config store для загрузки и сохранения профилей
+- Добавлены application services для работы с профилями и настройками приложения

@@ -5,6 +5,8 @@ from pathlib import Path
 from pg_backup_manager.domain.models import AppSettings, BackupProfile
 from pg_backup_manager.domain.validators import validate_profile
 from pg_backup_manager.infrastructure.config_store import JsonConfigStore
+from pg_backup_manager.infrastructure.scheduler import ScheduledTaskInfo, WindowsTaskScheduler
+from pg_backup_manager.shared.errors import ValidationError
 
 
 class ProfileService:
@@ -51,3 +53,50 @@ class AppSettingsService:
         settings.last_profile_path = normalized
         settings.recent_profile_paths = recent[:10]
         return settings
+
+
+class SchedulerService:
+    def __init__(self, scheduler: WindowsTaskScheduler | None = None) -> None:
+        self._scheduler = scheduler or WindowsTaskScheduler()
+
+    def create_or_update_task(
+        self,
+        *,
+        profile: BackupProfile,
+        task_run_command: str,
+        run_password: str | None = None,
+    ) -> str:
+        if not profile.scheduler.enabled:
+            raise ValidationError("Планировщик отключён в настройках профиля.")
+
+        if not profile.scheduler.task_name.strip():
+            raise ValidationError("Не указано имя задачи Планировщика.")
+
+        return self._scheduler.create_or_update_task(
+            task_name=profile.scheduler.task_name,
+            task_run_command=task_run_command,
+            schedule_type=profile.scheduler.schedule_type,
+            start_time=profile.scheduler.start_time,
+            days_of_week=profile.scheduler.days_of_week,
+            run_user=profile.scheduler.run_user,
+            run_password=run_password,
+            run_with_highest_privileges=profile.scheduler.run_with_highest_privileges,
+        )
+
+    def delete_task(self, profile: BackupProfile) -> str:
+        task_name = profile.scheduler.task_name.strip()
+        if not task_name:
+            raise ValidationError("Не указано имя задачи Планировщика.")
+        return self._scheduler.delete_task(task_name)
+
+    def query_task(self, profile: BackupProfile) -> ScheduledTaskInfo:
+        task_name = profile.scheduler.task_name.strip()
+        if not task_name:
+            raise ValidationError("Не указано имя задачи Планировщика.")
+        return self._scheduler.query_task(task_name)
+
+    def run_task(self, profile: BackupProfile) -> str:
+        task_name = profile.scheduler.task_name.strip()
+        if not task_name:
+            raise ValidationError("Не указано имя задачи Планировщика.")
+        return self._scheduler.run_task(task_name)

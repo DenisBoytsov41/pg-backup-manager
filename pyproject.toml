@@ -5,16 +5,46 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pg-backup-manager"
 version = "0.1.0"
-description = "Windows desktop app for PostgreSQL 1C backup management"
+description = "Windows desktop application for PostgreSQL 1C backup management"
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
 authors = [
   { name = "Denis Boytsov" }
 ]
+keywords = ["postgresql", "backup", "1c", "windows", "scheduler", "gui"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: Microsoft :: Windows",
+  "Intended Audience :: Developers",
+  "Topic :: Database",
+  "Topic :: System :: Archiving :: Backup"
+]
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+  "black",
+  "pytest",
+  "ruff",
+  "pyinstaller"
+]
+
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

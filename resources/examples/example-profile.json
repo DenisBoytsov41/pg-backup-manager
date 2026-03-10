@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "profile_name": "Example Profile",
+  "postgres": {
+    "host": "localhost",
+    "port": 5432,
+    "databases": [
+      "Roznica_Butik",
+      "Rarus_obshepit"
+    ],
+    "user": "postgres",
+    "password": "",
+    "pg_dump_path": "C:\\Program Files\\PostgreSQL\\15\\bin\\pg_dump.exe",
+    "pg_dumpall_path": "C:\\Program Files\\PostgreSQL\\15\\bin\\pg_dumpall.exe"
+  },
+  "backup": {
+    "backup_dir": "C:\\Backup\\PostgreSQL",
+    "retention_days": 30,
+    "dump_globals": true,
+    "naming_pattern": "{database}_{timestamp}"
+  },
+  "logging": {
+    "main_log_name": "backup.log",
+    "log_level": "INFO"
+  },
+  "scheduler": {
+    "enabled": false,
+    "task_name": "PG Backup Example",
+    "schedule_type": "daily",
+    "start_time": "02:00",
+    "days_of_week": [],
+    "run_user": "",
+    "run_with_highest_privileges": false
+  }
+}

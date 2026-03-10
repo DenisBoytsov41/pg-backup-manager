@@ -63,3 +63,7 @@
   - `scheduler-delete`
 - Добавлен вывод статуса задачи Планировщика в CLI
 - Добавлен отдельный код возврата для случаев, когда задача не найдена при `scheduler-query`
+
+- Добавлен пример профиля `resources/examples/example-profile.json`
+- Добавлено краткое руководство пользователя `docs/user-guide/quick-start.md`
+- Добавлена инструкция по сборке `docs/dev-guide/build.md`

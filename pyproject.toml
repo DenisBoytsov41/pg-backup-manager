@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pg-backup-manager"
-version = "0.1.0"
+version = "0.1.1"
 description = "Windows desktop application for PostgreSQL 1C backup management"
 readme = "README.md"
 requires-python = ">=3.11"

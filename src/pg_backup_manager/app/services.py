@@ -4,11 +4,11 @@ import sys
 from pathlib import Path
 
 from pg_backup_manager.domain.models import AppSettings, BackupProfile
-from pg_backup_manager.domain.validators import validate_profile
+from pg_backup_manager.domain.validators import validate_profile, validate_scheduler_settings
 from pg_backup_manager.infrastructure.config_store import JsonConfigStore
 from pg_backup_manager.infrastructure.scheduler import ScheduledTaskInfo, WindowsTaskScheduler
 from pg_backup_manager.shared.errors import ValidationError
-from pg_backup_manager.shared.paths import get_app_dir
+from pg_backup_manager.shared.paths import get_app_dir, sanitize_file_name
 
 
 class ProfileService:
@@ -31,8 +31,7 @@ class ProfileService:
         validate_profile(profile)
 
     def get_profile_file_name(self, profile: BackupProfile) -> str:
-        safe_name = profile.profile_name.strip() or "profile"
-        safe_name = safe_name.replace(" ", "_")
+        safe_name = sanitize_file_name(profile.profile_name, fallback="profile")
         return f"{safe_name}.json"
 
 
@@ -47,7 +46,7 @@ class AppSettingsService:
         self._config_store.save_app_settings(path, settings)
 
     def register_recent_profile(self, settings: AppSettings, profile_path: str) -> AppSettings:
-        normalized = str(Path(profile_path))
+        normalized = str(Path(profile_path).expanduser().resolve(strict=False))
 
         recent = [item for item in settings.recent_profile_paths if item != normalized]
         recent.insert(0, normalized)
@@ -62,7 +61,7 @@ class SchedulerService:
         self._scheduler = scheduler or WindowsTaskScheduler()
 
     def build_task_run_command(self, profile_path: str) -> str:
-        normalized_profile_path = str(Path(profile_path).resolve())
+        normalized_profile_path = str(Path(profile_path).expanduser().resolve(strict=False))
 
         if getattr(sys, "frozen", False):
             executable = str(Path(sys.executable).resolve())
@@ -89,8 +88,12 @@ class SchedulerService:
         if not profile.scheduler.enabled:
             raise ValidationError("Планировщик отключён в настройках профиля.")
 
-        if not profile.scheduler.task_name.strip():
-            raise ValidationError("Не указано имя задачи Планировщика.")
+        validate_scheduler_settings(
+            schedule_type=profile.scheduler.schedule_type,
+            start_time=profile.scheduler.start_time,
+            task_name=profile.scheduler.task_name,
+            days_of_week=profile.scheduler.days_of_week,
+        )
 
         task_run_command = self.build_task_run_command(profile_path)
 

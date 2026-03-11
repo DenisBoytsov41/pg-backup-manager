@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from pg_backup_manager.app.services import ProfileService, SchedulerService
+from pg_backup_manager.domain.models import BackupProfile
 from pg_backup_manager.infrastructure.backup_runner import BackupRunner
 from pg_backup_manager.infrastructure.config_store import JsonConfigStore
 from pg_backup_manager.infrastructure.scheduler import ScheduledTaskInfo
@@ -91,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_profile(profile_path: str):
+def _load_profile(profile_path: str) -> tuple[ProfileService, BackupProfile]:
     config_store = JsonConfigStore()
     profile_service = ProfileService(config_store)
     profile = profile_service.load_profile(profile_path)
@@ -106,12 +107,16 @@ def _print_task_info(info: ScheduledTaskInfo) -> None:
         return
 
     print(f"Task name: {info.task_name}")
+
     if info.status:
         print(f"Status: {info.status}")
+
     if info.next_run_time:
         print(f"Next run time: {info.next_run_time}")
+
     if info.last_result:
         print(f"Last result: {info.last_result}")
+
     if info.task_to_run:
         print(f"Task to run: {info.task_to_run}")
 

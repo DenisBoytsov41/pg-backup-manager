@@ -17,7 +17,7 @@
     "backup_dir": "C:\\Backup\\PostgreSQL",
     "retention_days": 30,
     "dump_globals": true,
-    "naming_pattern": "{database}_{timestamp}"
+    "naming_pattern": "{profile}_{database}_{timestamp}"
   },
   "logging": {
     "main_log_name": "backup.log",

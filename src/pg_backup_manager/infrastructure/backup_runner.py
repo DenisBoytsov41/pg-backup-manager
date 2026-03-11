@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pg_backup_manager.domain.models import BackupProfile
-from pg_backup_manager.domain.validators import validate_existing_executable, validate_profile
+from pg_backup_manager.domain.validators import validate_profile
 from pg_backup_manager.infrastructure.logging_service import LoggingService
 from pg_backup_manager.shared.errors import BackupExecutionError
 from pg_backup_manager.shared.paths import (
@@ -34,8 +34,7 @@ class BackupRunResult:
 
 class BackupRunner:
     def run_profile(self, profile: BackupProfile) -> BackupRunResult:
-        validate_profile(profile)
-        validate_existing_executable(profile.postgres.pg_dump_path, "pg_dump.exe")
+        validate_profile(profile, strict_runtime=True)
 
         backup_dir = ensure_directory(normalize_path(profile.backup.backup_dir))
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -47,7 +46,6 @@ class BackupRunner:
 
         created_dump_files: list[str] = []
         created_globals_file: str | None = None
-
         previous_password = os.environ.get("PGPASSWORD")
 
         try:
@@ -57,7 +55,12 @@ class BackupRunner:
                 os.environ.pop("PGPASSWORD", None)
 
             for database_name in profile.postgres.databases:
-                dump_file_name = build_dump_file_name(database_name, timestamp)
+                dump_file_name = build_dump_file_name(
+                    database_name=database_name,
+                    timestamp=timestamp,
+                    naming_pattern=profile.backup.naming_pattern,
+                    profile_name=profile.profile_name,
+                )
                 dump_path = backup_dir / dump_file_name
 
                 args = [
@@ -76,7 +79,7 @@ class BackupRunner:
                     database_name,
                 ]
 
-                result = subprocess.run(args, capture_output=True)
+                result = self._run_process(args)
 
                 stdout_text = self._decode_bytes(result.stdout)
                 stderr_text = self._decode_bytes(result.stderr)
@@ -102,11 +105,16 @@ class BackupRunner:
                     )
 
                 created_dump_files.append(str(dump_path))
+                logger.write_main_log(
+                    f"Backup базы '{database_name}' сохранён в '{dump_path.name}'.",
+                    level="INFO",
+                )
 
-            if profile.backup.dump_globals and profile.postgres.pg_dumpall_path.strip():
-                validate_existing_executable(profile.postgres.pg_dumpall_path, "pg_dumpall.exe")
-
-                globals_file_name = build_globals_file_name(timestamp)
+            if profile.backup.dump_globals:
+                globals_file_name = build_globals_file_name(
+                    timestamp=timestamp,
+                    profile_name=profile.profile_name,
+                )
                 globals_path = backup_dir / globals_file_name
 
                 globals_args = [
@@ -121,7 +129,7 @@ class BackupRunner:
                     "--no-password",
                 ]
 
-                result = subprocess.run(globals_args, capture_output=True)
+                result = self._run_process(globals_args)
 
                 stdout_text = self._decode_bytes(result.stdout)
                 stderr_text = self._decode_bytes(result.stderr)
@@ -145,11 +153,17 @@ class BackupRunner:
                         level="WARNING",
                     )
 
-            self._cleanup_old_files(
-                backup_dir=backup_dir,
-                retention_days=profile.backup.retention_days,
-                main_log_name=profile.logging.main_log_name,
-            )
+            try:
+                self._cleanup_old_files(
+                    backup_dir=backup_dir,
+                    retention_days=profile.backup.retention_days,
+                    main_log_name=profile.logging.main_log_name,
+                )
+            except OSError as exc:
+                logger.write_main_log(
+                    f"Не удалось выполнить очистку устаревших файлов: {exc}",
+                    level="WARNING",
+                )
 
             success_message = "Резервное копирование выполнено успешно."
             logger.write_main_log(success_message, level="INFO")
@@ -178,6 +192,7 @@ class BackupRunner:
                 os.environ.pop("PGPASSWORD", None)
 
     def _cleanup_old_files(self, backup_dir: Path, retention_days: int, main_log_name: str) -> None:
+        # retention_days <= 0 трактуем как отключение автоочистки
         if retention_days <= 0:
             return
 
@@ -196,6 +211,20 @@ class BackupRunner:
             if file_path.stat().st_mtime < border:
                 file_path.unlink(missing_ok=True)
 
+    def _run_process(self, args: list[str]) -> subprocess.CompletedProcess[bytes]:
+        try:
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            return subprocess.run(
+                args,
+                capture_output=True,
+                check=False,
+                creationflags=creationflags,
+            )
+        except FileNotFoundError as exc:
+            raise BackupExecutionError(f"Не найден исполняемый файл: {args[0]}") from exc
+        except OSError as exc:
+            raise BackupExecutionError(f"Не удалось запустить процесс '{args[0]}': {exc}") from exc
+
     def _decode_bytes(self, data: bytes | None) -> str:
         if not data:
             return ""
@@ -209,9 +238,12 @@ class BackupRunner:
         return data.decode("utf-8", errors="replace")
 
     def _combine_output(self, stdout_text: str, stderr_text: str) -> str:
-        parts = []
+        parts: list[str] = []
+
         if stdout_text.strip():
             parts.append(stdout_text.strip())
+
         if stderr_text.strip():
             parts.append(stderr_text.strip())
+
         return "\n".join(parts)

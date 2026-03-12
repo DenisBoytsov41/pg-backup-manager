@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable
@@ -8,9 +7,14 @@ from typing import Callable
 from pg_backup_manager import __version__
 from pg_backup_manager.app.services import AppSettingsService, ProfileService, SchedulerService
 from pg_backup_manager.domain.models import AppSettings, BackupProfile, ScheduleType
-from pg_backup_manager.infrastructure.backup_runner import BackupExecutionError, BackupRunner
+from pg_backup_manager.infrastructure.backup_runner import BackupRunner
 from pg_backup_manager.infrastructure.config_store import JsonConfigStore
-from pg_backup_manager.shared.errors import ConfigError, SchedulerError, ValidationError
+from pg_backup_manager.shared.errors import (
+    BackupExecutionError,
+    ConfigError,
+    SchedulerError,
+    ValidationError,
+)
 from pg_backup_manager.shared.paths import get_app_dir, get_default_app_settings_path
 from pg_backup_manager.ui.app_settings_controller import AppSettingsController
 from pg_backup_manager.ui.backup_controller import BackupController
@@ -20,6 +24,11 @@ from pg_backup_manager.ui.form_state import MainWindowState
 from pg_backup_manager.ui.profile_controller import ProfileController
 from pg_backup_manager.ui.profile_mapper import build_profile_from_state, populate_state_from_profile
 from pg_backup_manager.ui.scheduler_controller import SchedulerController
+from pg_backup_manager.ui.tabs.actions_tab import build_actions_tab
+from pg_backup_manager.ui.tabs.backup_tab import build_backup_tab
+from pg_backup_manager.ui.tabs.config_tab import build_config_tab
+from pg_backup_manager.ui.tabs.postgres_tab import build_postgres_tab
+from pg_backup_manager.ui.tabs.scheduler_tab import build_scheduler_tab
 
 
 class MainWindow(tk.Tk):
@@ -119,14 +128,52 @@ class MainWindow(tk.Tk):
         notebook.add(tab_scheduler, text="Планировщик")
         notebook.add(tab_actions, text="Действия")
 
-        self._build_config_tab(tab_config)
-        self._build_postgres_tab(tab_pg)
-        self._build_backup_tab(tab_backup)
-        self._build_scheduler_tab(tab_scheduler)
-        self._build_actions_tab(tab_actions)
+        build_config_tab(
+            parent=tab_config,
+            state=self._state,
+            add_labeled_entry=self._add_labeled_entry,
+        )
 
-        status_bar = ttk.Label(root, textvariable=self._state.status_var, anchor="w")
-        status_bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        build_postgres_tab(
+            parent=tab_pg,
+            state=self._state,
+            add_labeled_entry=self._add_labeled_entry,
+            choose_file=self._choose_file,
+        )
+
+        build_backup_tab(
+            parent=tab_backup,
+            state=self._state,
+            add_labeled_entry=self._add_labeled_entry,
+            choose_folder=self._choose_folder,
+        )
+
+        self._days_of_week_entry, self._scheduler_create_button = build_scheduler_tab(
+            parent=tab_scheduler,
+            state=self._state,
+            add_labeled_entry=self._add_labeled_entry,
+            add_labeled_combobox=self._add_labeled_combobox,
+            create_or_update_task=self._scheduler_controller.create_or_update_task,
+            query_task=self._scheduler_controller.query_task,
+            run_task_now=self._scheduler_controller.run_task_now,
+            delete_task=self._scheduler_controller.delete_task,
+        )
+
+        build_actions_tab(
+            parent=tab_actions,
+            validate_profile=self._backup_controller.validate_profile,
+            run_test_backup=self._backup_controller.run_test_backup,
+            open_backup_folder=self._backup_controller.open_backup_folder,
+            open_app_folder=self._open_app_folder,
+            close_window=self._on_close,
+        )
+
+        ttk.Label(root, textvariable=self._state.status_var, anchor="w").grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            pady=(8, 0),
+        )
 
     def _build_profile_top_panel(self, parent: ttk.Frame) -> None:
         top = ttk.LabelFrame(parent, text="Профиль", padding=10)
@@ -155,222 +202,17 @@ class MainWindow(tk.Tk):
             row=1, column=3, padx=4, pady=4, sticky="w"
         )
 
-    def _build_config_tab(self, parent: ttk.Frame) -> None:
-        self._add_labeled_entry(parent, 0, "Имя профиля:", self._state.profile_name_var)
-
-        ttk.Label(
-            parent,
-            text=(
-                "Профиль описывает все настройки backup: PostgreSQL, папку backup, "
-                "логи и расписание."
-            ),
-            foreground="#555555",
-            wraplength=820,
-            justify="left",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-
-    def _build_postgres_tab(self, parent: ttk.Frame) -> None:
-        self._add_labeled_entry(parent, 0, "Host:", self._state.host_var)
-        self._add_labeled_entry(parent, 1, "Port:", self._state.port_var)
-        self._add_labeled_entry(parent, 2, "Базы (через запятую):", self._state.databases_var)
-        self._add_labeled_entry(parent, 3, "User:", self._state.user_var)
-        self._add_labeled_entry(parent, 4, "Password:", self._state.password_var, show="*")
-
-        self._add_labeled_entry(
-            parent,
-            5,
-            "Путь к pg_dump.exe:",
-            self._state.pg_dump_path_var,
-            button_text="Выбрать...",
-            button_command=lambda: self._choose_file(
-                self._state.pg_dump_path_var,
-                "Выберите pg_dump.exe",
-                [("Executable files", "*.exe"), ("All files", "*.*")],
-            ),
-        )
-
-        self._add_labeled_entry(
-            parent,
-            6,
-            "Путь к pg_dumpall.exe:",
-            self._state.pg_dumpall_path_var,
-            button_text="Выбрать...",
-            button_command=lambda: self._choose_file(
-                self._state.pg_dumpall_path_var,
-                "Выберите pg_dumpall.exe",
-                [("Executable files", "*.exe"), ("All files", "*.*")],
-            ),
-        )
-
-    def _build_backup_tab(self, parent: ttk.Frame) -> None:
-        self._add_labeled_entry(
-            parent,
-            0,
-            "Папка backup:",
-            self._state.backup_dir_var,
-            button_text="Выбрать...",
-            button_command=lambda: self._choose_folder(
-                self._state.backup_dir_var,
-                "Выберите папку для backup",
-            ),
-        )
-        self._add_labeled_entry(parent, 1, "Хранить дней:", self._state.retention_days_var)
-        self._add_labeled_entry(parent, 2, "Шаблон имени:", self._state.naming_pattern_var)
-        self._add_labeled_entry(parent, 3, "Имя общего лога:", self._state.main_log_name_var)
-        self._add_labeled_entry(parent, 4, "Log level:", self._state.log_level_var)
-
-        ttk.Checkbutton(
-            parent,
-            text="Выгружать globals (roles/tablespaces)",
-            variable=self._state.dump_globals_var,
-        ).grid(row=5, column=1, sticky="w", pady=4)
-
-        ttk.Label(
-            parent,
-            text=(
-                "Шаблон имени может использовать: {database}, {timestamp}, {profile}. "
-                "Обязательны {database} и {timestamp}."
-            ),
-            foreground="#555555",
-            wraplength=780,
-            justify="left",
-        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
-
-        ttk.Label(
-            parent,
-            text="При значении 0 автоочистка старых .backup/.log/.sql файлов отключается.",
-            foreground="#555555",
-            wraplength=780,
-            justify="left",
-        ).grid(row=7, column=0, columnspan=3, sticky="w", pady=(6, 0))
-
-        ttk.Label(
-            parent,
-            text="Если включена выгрузка globals, должен быть указан путь к pg_dumpall.exe.",
-            foreground="#555555",
-            wraplength=780,
-            justify="left",
-        ).grid(row=8, column=0, columnspan=3, sticky="w", pady=(6, 0))
-
-    def _build_scheduler_tab(self, parent: ttk.Frame) -> None:
-        ttk.Checkbutton(
-            parent,
-            text="Включить планировщик для профиля",
-            variable=self._state.scheduler_enabled_var,
-        ).grid(row=0, column=1, sticky="w", pady=4)
-
-        self._add_labeled_entry(parent, 1, "Имя задачи:", self._state.task_name_var)
-
-        self._add_labeled_combobox(
-            parent,
-            2,
-            "Тип расписания:",
-            self._state.schedule_type_var,
-            [item.value for item in ScheduleType],
-        )
-
-        self._add_labeled_entry(parent, 3, "Время запуска (HH:MM):", self._state.start_time_var)
-        self._days_of_week_entry = self._add_labeled_entry(
-            parent,
-            4,
-            "Дни недели (через запятую):",
-            self._state.days_of_week_var,
-        )
-        self._add_labeled_entry(parent, 5, "Пользователь запуска:", self._state.run_user_var)
-        self._add_labeled_entry(
-            parent,
-            6,
-            "Пароль запуска (не сохраняется):",
-            self._state.run_password_var,
-            show="*",
-        )
-
-        ttk.Checkbutton(
-            parent,
-            text="Запускать с наивысшими правами",
-            variable=self._state.run_with_highest_privileges_var,
-        ).grid(row=7, column=1, sticky="w", pady=4)
-
-        ttk.Label(
-            parent,
-            text=(
-                "Если планировщик включён, имя задачи обязательно, а тип расписания "
-                "не должен быть disabled."
-            ),
-            foreground="#555555",
-            wraplength=780,
-            justify="left",
-        ).grid(row=8, column=0, columnspan=3, sticky="w", pady=(6, 8))
-
-        scheduler_actions = ttk.LabelFrame(parent, text="Управление задачей", padding=10)
-        scheduler_actions.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        scheduler_actions.columnconfigure(0, weight=1)
-
-        self._scheduler_create_button = ttk.Button(
-            scheduler_actions,
-            text="Создать / обновить задачу",
-            command=self._scheduler_controller.create_or_update_task,
-        )
-        self._scheduler_create_button.grid(row=0, column=0, sticky="w", padx=4, pady=4)
-
-        ttk.Button(
-            scheduler_actions,
-            text="Проверить задачу",
-            command=self._scheduler_controller.query_task,
-        ).grid(row=1, column=0, sticky="w", padx=4, pady=4)
-
-        ttk.Button(
-            scheduler_actions,
-            text="Запустить задачу сейчас",
-            command=self._scheduler_controller.run_task_now,
-        ).grid(row=2, column=0, sticky="w", padx=4, pady=4)
-
-        ttk.Button(
-            scheduler_actions,
-            text="Удалить задачу",
-            command=self._scheduler_controller.delete_task,
-        ).grid(row=3, column=0, sticky="w", padx=4, pady=4)
-
-        ttk.Label(
-            scheduler_actions,
-            textvariable=self._state.scheduler_status_var,
-            justify="left",
-            wraplength=760,
-            foreground="#333333",
-        ).grid(row=4, column=0, sticky="w", padx=4, pady=(10, 4))
-
-    def _build_actions_tab(self, parent: ttk.Frame) -> None:
-        actions = ttk.LabelFrame(parent, text="Действия", padding=10)
-        actions.grid(row=0, column=0, columnspan=2, sticky="ew")
-        actions.columnconfigure(0, weight=1)
-
-        ttk.Button(actions, text="Проверить профиль", command=self._backup_controller.validate_profile).grid(
-            row=0, column=0, sticky="w", padx=4, pady=4
-        )
-        ttk.Button(actions, text="Тестовый backup сейчас", command=self._backup_controller.run_test_backup).grid(
-            row=1, column=0, sticky="w", padx=4, pady=4
-        )
-        ttk.Button(actions, text="Открыть папку backup", command=self._backup_controller.open_backup_folder).grid(
-            row=2, column=0, sticky="w", padx=4, pady=4
-        )
-        ttk.Button(actions, text="Открыть папку приложения", command=self._open_app_folder).grid(
-            row=3, column=0, sticky="w", padx=4, pady=4
-        )
-        ttk.Button(actions, text="Закрыть", command=self._on_close).grid(
-            row=4, column=0, sticky="w", padx=4, pady=(12, 4)
-        )
-
     def _create_entry(
         self,
         parent: ttk.Widget,
         variable: tk.StringVar,
         show: str | None = None,
     ) -> ttk.Entry:
-        if show is None:
-            entry = ttk.Entry(parent, textvariable=variable)
-        else:
-            entry = ttk.Entry(parent, textvariable=variable, show=show)
-
+        entry = ttk.Entry(parent, textvariable=variable) if show is None else ttk.Entry(
+            parent,
+            textvariable=variable,
+            show=show,
+        )
         self._entry_menu_manager.attach(entry)
         return entry
 
@@ -385,6 +227,7 @@ class MainWindow(tk.Tk):
         show: str | None = None,
     ) -> ttk.Entry:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+
         entry = self._create_entry(parent, variable, show=show)
         entry.grid(row=row, column=1, sticky="ew", pady=4)
 
@@ -411,20 +254,12 @@ class MainWindow(tk.Tk):
         combobox.grid(row=row, column=1, sticky="ew", pady=4)
         return combobox
 
-    # -------------------------------------------------------------------------
-    # State mapping
-    # -------------------------------------------------------------------------
-
     def _get_current_profile(self) -> BackupProfile:
         return build_profile_from_state(self._state)
 
     def _apply_profile(self, profile: BackupProfile) -> None:
         populate_state_from_profile(self._state, profile)
         self._update_scheduler_field_states()
-
-    # -------------------------------------------------------------------------
-    # Dynamic UI state
-    # -------------------------------------------------------------------------
 
     def _bind_dynamic_state(self) -> None:
         self._state.scheduler_enabled_var.trace_add("write", self._on_scheduler_state_changed)
@@ -449,10 +284,6 @@ class MainWindow(tk.Tk):
                 self._scheduler_create_button.state(["!disabled"])
             else:
                 self._scheduler_create_button.state(["disabled"])
-
-    # -------------------------------------------------------------------------
-    # File/folder actions
-    # -------------------------------------------------------------------------
 
     def _choose_file(
         self,
@@ -480,10 +311,6 @@ class MainWindow(tk.Tk):
 
     def _open_app_folder(self) -> None:
         open_in_explorer(self._app_dir)
-
-    # -------------------------------------------------------------------------
-    # Startup / shutdown
-    # -------------------------------------------------------------------------
 
     def _load_startup(self) -> None:
         self._app_settings = self._app_settings_controller.load_startup()

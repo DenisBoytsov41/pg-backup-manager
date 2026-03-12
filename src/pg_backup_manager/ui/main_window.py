@@ -29,6 +29,14 @@ from pg_backup_manager.ui.tabs.backup_tab import build_backup_tab
 from pg_backup_manager.ui.tabs.config_tab import build_config_tab
 from pg_backup_manager.ui.tabs.postgres_tab import build_postgres_tab
 from pg_backup_manager.ui.tabs.scheduler_tab import build_scheduler_tab
+from pg_backup_manager.ui.ui_style import (
+    EXTRA_LARGE_BUTTON_WIDTH,
+    PAD_X,
+    PAD_Y,
+    SECTION_PAD_Y,
+    TOP_ACTION_BUTTON_WIDTH,
+    TOP_SECONDARY_BUTTON_WIDTH,
+)
 
 
 class MainWindow(tk.Tk):
@@ -113,14 +121,15 @@ class MainWindow(tk.Tk):
         notebook.grid(row=1, column=0, sticky="nsew")
         notebook.enable_traversal()
 
-        tab_config = ttk.Frame(notebook, padding=12)
-        tab_pg = ttk.Frame(notebook, padding=12)
-        tab_backup = ttk.Frame(notebook, padding=12)
-        tab_scheduler = ttk.Frame(notebook, padding=12)
-        tab_actions = ttk.Frame(notebook, padding=12)
+        tab_config = ttk.Frame(notebook)
+        tab_pg = ttk.Frame(notebook)
+        tab_backup = ttk.Frame(notebook)
+        tab_scheduler = ttk.Frame(notebook)
+        tab_actions = ttk.Frame(notebook)
 
         for tab in (tab_config, tab_pg, tab_backup, tab_scheduler, tab_actions):
-            tab.columnconfigure(1, weight=1)
+            tab.columnconfigure(0, weight=1)
+            tab.rowconfigure(0, weight=1)
 
         notebook.add(tab_config, text="Конфиг")
         notebook.add(tab_pg, text="PostgreSQL")
@@ -168,39 +177,83 @@ class MainWindow(tk.Tk):
             close_window=self._on_close,
         )
 
-        ttk.Label(root, textvariable=self._state.status_var, anchor="w").grid(
-            row=2,
-            column=0,
-            sticky="ew",
-            pady=(8, 0),
-        )
+        ttk.Label(
+            root,
+            textvariable=self._state.status_var,
+            anchor="w",
+        ).grid(row=2, column=0, sticky="ew", pady=(SECTION_PAD_Y, 0))
 
     def _build_profile_top_panel(self, parent: ttk.Frame) -> None:
-        top = ttk.LabelFrame(parent, text="Профиль", padding=10)
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        top = ttk.LabelFrame(parent, text="Профиль", padding=12)
+        top.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_PAD_Y))
         top.columnconfigure(1, weight=1)
 
-        ttk.Label(top, text="Путь к профилю:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
-        self._create_entry(top, self._state.profile_path_var).grid(row=0, column=1, sticky="ew", pady=4)
+        # Строка 1: путь + загрузка
+        ttk.Label(top, text="Путь к профилю:").grid(
+            row=0,
+            column=0,
+            sticky="w",
+            padx=(0, PAD_X),
+            pady=PAD_Y,
+        )
 
-        ttk.Button(top, text="Открыть...", command=self._profile_controller.browse_profile).grid(
-            row=0, column=2, padx=4, pady=4
+        self._create_entry(top, self._state.profile_path_var).grid(
+            row=0,
+            column=1,
+            sticky="ew",
+            pady=PAD_Y,
         )
-        ttk.Button(top, text="Загрузить", command=self._profile_controller.load_profile_from_current_path).grid(
-            row=0, column=3, padx=4, pady=4
-        )
-        ttk.Button(top, text="Новый", command=self._profile_controller.new_profile).grid(
-            row=1, column=0, padx=4, pady=4, sticky="w"
-        )
-        ttk.Button(top, text="Сохранить", command=self._profile_controller.save_profile).grid(
-            row=1, column=1, padx=4, pady=4, sticky="w"
-        )
-        ttk.Button(top, text="Сохранить как...", command=self._profile_controller.save_profile_as).grid(
-            row=1, column=2, padx=4, pady=4, sticky="w"
-        )
-        ttk.Button(top, text="Открыть папку профиля", command=self._profile_controller.open_profile_folder).grid(
-            row=1, column=3, padx=4, pady=4, sticky="w"
-        )
+
+        ttk.Button(
+            top,
+            text="Открыть...",
+            width=TOP_ACTION_BUTTON_WIDTH,
+            command=self._profile_controller.browse_profile,
+        ).grid(row=0, column=2, padx=(PAD_X, 0), pady=PAD_Y)
+
+        ttk.Button(
+            top,
+            text="Загрузить",
+            width=TOP_ACTION_BUTTON_WIDTH,
+            command=self._profile_controller.load_profile_from_current_path,
+        ).grid(row=0, column=3, padx=(PAD_X, 0), pady=PAD_Y)
+
+        # Строка 2: основные действия слева, вторичное справа
+        actions_row = ttk.Frame(top)
+        actions_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(PAD_Y, 0))
+        actions_row.columnconfigure(0, weight=0)
+        actions_row.columnconfigure(1, weight=0)
+        actions_row.columnconfigure(2, weight=0)
+        actions_row.columnconfigure(3, weight=1)
+        actions_row.columnconfigure(4, weight=0)
+
+        ttk.Button(
+            actions_row,
+            text="Новый",
+            width=TOP_ACTION_BUTTON_WIDTH,
+            command=self._profile_controller.new_profile,
+        ).grid(row=0, column=0, padx=(0, PAD_X), pady=PAD_Y, sticky="w")
+
+        ttk.Button(
+            actions_row,
+            text="Сохранить",
+            width=TOP_ACTION_BUTTON_WIDTH,
+            command=self._profile_controller.save_profile,
+        ).grid(row=0, column=1, padx=(0, PAD_X), pady=PAD_Y, sticky="w")
+
+        ttk.Button(
+            actions_row,
+            text="Сохранить как...",
+            width=TOP_SECONDARY_BUTTON_WIDTH,
+            command=self._profile_controller.save_profile_as,
+        ).grid(row=0, column=2, padx=(0, PAD_X), pady=PAD_Y, sticky="w")
+
+        ttk.Button(
+            actions_row,
+            text="Открыть папку профиля",
+            width=EXTRA_LARGE_BUTTON_WIDTH,
+            command=self._profile_controller.open_profile_folder,
+        ).grid(row=0, column=4, pady=PAD_Y, sticky="e")
 
     def _create_entry(
         self,
@@ -226,18 +279,24 @@ class MainWindow(tk.Tk):
         button_command: Callable[[], None] | None = None,
         show: str | None = None,
     ) -> ttk.Entry:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Label(parent, text=label, width=22).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            padx=(0, PAD_X),
+            pady=PAD_Y,
+        )
 
         entry = self._create_entry(parent, variable, show=show)
-        entry.grid(row=row, column=1, sticky="ew", pady=4)
+        entry.grid(row=row, column=1, sticky="ew", pady=PAD_Y)
 
         if button_text and button_command:
-            ttk.Button(parent, text=button_text, command=button_command).grid(
-                row=row,
-                column=2,
-                padx=4,
-                pady=4,
-            )
+            ttk.Button(
+                parent,
+                text=button_text,
+                width=TOP_ACTION_BUTTON_WIDTH,
+                command=button_command,
+            ).grid(row=row, column=2, padx=(PAD_X, 0), pady=PAD_Y)
 
         return entry
 
@@ -249,9 +308,15 @@ class MainWindow(tk.Tk):
         variable: tk.StringVar,
         values: list[str],
     ) -> ttk.Combobox:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Label(parent, text=label, width=22).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            padx=(0, PAD_X),
+            pady=PAD_Y,
+        )
         combobox = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly")
-        combobox.grid(row=row, column=1, sticky="ew", pady=4)
+        combobox.grid(row=row, column=1, sticky="ew", pady=PAD_Y)
         return combobox
 
     def _get_current_profile(self) -> BackupProfile:
